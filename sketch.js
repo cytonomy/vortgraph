@@ -69,8 +69,8 @@ let frameCount = 0;
 let lastCleanupTime = 0;
 
 // Add these constants for edge visualization
-const EDGE_VISIBILITY = 0.045;  // Increased from 0.03 (1.5x more visible)
-const EDGE_WEIGHT = 0.45;      // Increased from 0.3 (1.5x thicker)
+const EDGE_VISIBILITY = 0.08;  // Increased from 0.045 for brighter edges
+const EDGE_WEIGHT = 0.6;      // Increased from 0.45 for thicker edges
 
 // Add these constants for boundary handling
 const BOUNDARY_MARGIN = 50;  // Distance from edge to apply force
@@ -111,11 +111,11 @@ class Edge {
   
   // Add this method to display the edge
   display() {
-    // Use node colors for edge gradient with reduced visibility
+    // Use node colors for edge gradient with increased visibility
     let startColor = color(this.startNode.hue, this.startNode.saturation, this.startNode.brightness, EDGE_VISIBILITY);
     let endColor = color(this.endNode.hue, this.endNode.saturation, this.endNode.brightness, EDGE_VISIBILITY);
     
-    // Draw a very faint line
+    // Draw a brighter line
     strokeWeight(EDGE_WEIGHT);
     stroke(lerpColor(startColor, endColor, 0.5));
     line(this.startNode.pos.x, this.startNode.pos.y, this.endNode.pos.x, this.endNode.pos.y);
@@ -352,18 +352,18 @@ class Particle {
 
   // Simplified display method
   display() {
-    const alpha = map(this.lifespan, 0, PARTICLE_LIFESPAN, 0, 0.9);  // Reduced from 1.0
+    const alpha = map(this.lifespan, 0, PARTICLE_LIFESPAN, 0, 1.0);  // Increased from 0.9 to 1.0
     
-    // Draw trail segments with less glow
+    // Draw trail segments with more glow
     for (let i = 0; i < PARTICLE_TRAIL_LENGTH - 1; i++) {
       if (this.trailX[i] && this.trailY[i] && this.trailX[i+1] && this.trailY[i+1]) {
-        // Use exponential decay for alpha instead of linear
-        const segmentAlpha = alpha * pow(0.4, i * 1.2);  // Faster decay (0.4 instead of 0.5)
+        // Use exponential decay for alpha with slower decay
+        const segmentAlpha = alpha * pow(0.6, i * 1.0);  // Changed from 0.4 to 0.6 for slower decay
         
         // Skip nearly invisible segments
         if (segmentAlpha > 0.03) {
-          // Use exponential decay for width too (with smaller starting width)
-          const segmentWidth = TRAIL_WIDTH_START * pow(0.5, i);  // Faster width decay
+          // Use exponential decay for width with larger starting width
+          const segmentWidth = TRAIL_WIDTH_START * 1.5 * pow(0.6, i);  // Increased width and slowed decay
           
           strokeWeight(segmentWidth);
           stroke(this.hue, this.saturation, this.brightness, segmentAlpha);
@@ -519,10 +519,10 @@ function shuffleArray(array, inPlace = false) {
   return arr;
 }
 
-// Modify drawGradientLine for less glow
+// Modify drawGradientLine for more glow
 function drawGradientLine(x1, y1, x2, y2, c1, c2) {
   let steps = NODE_RAY_STEPS;
-  let stepSize = 1.0;  // Reduced from 1.2
+  let stepSize = 1.5;  // Increased from 1.0 for more glow
   for (let i = 0; i < steps; i++) {
     let t = i / (steps - 1);
     let x = lerp(x1, x2, t);
@@ -530,7 +530,7 @@ function drawGradientLine(x1, y1, x2, y2, c1, c2) {
     let c = lerpColor(c1, c2, t);
     noStroke();
     fill(c);
-    let size = stepSize * (1 - t); // Gradually reduce size
+    let size = stepSize * (1 - t * 0.8); // Reduced decay for larger glow
     rect(x - size/2, y - size/2, size, size);
   }
 }

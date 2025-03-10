@@ -104,6 +104,13 @@ let clickActive = false;
 let clickPosition = null;
 let clickTimer = 0;
 
+// Add these variables for multi-touch support
+let touchPoints = [];
+const MAX_TOUCH_POINTS = 5; // Maximum number of simultaneous touch points to track
+
+// Add this constant for continuous distortion
+const CONTINUOUS_SPAWN_RATE = 0.3; // Chance to spawn particles while holding
+
 // Class definitions next
 class Edge {
   constructor(startNode, endNode) {
@@ -845,6 +852,14 @@ function draw() {
       clickPosition = null;
     }
   }
+
+  // Update and remove expired touch points
+  for (let i = touchPoints.length - 1; i >= 0; i--) {
+    touchPoints[i].timer--;
+    if (touchPoints[i].timer <= 0) {
+      touchPoints.splice(i, 1);
+    }
+  }
 }
 
 // Add this function to transform mouse coordinates based on rotation
@@ -864,16 +879,155 @@ function getRotatedMouseCoordinates() {
 // Modify mousePressed function to use smaller radius
 function mousePressed() {
   // Get rotated mouse coordinates
-  clickPosition = getRotatedMouseCoordinates();
-  clickActive = true;
-  clickTimer = CLICK_EFFECT_DURATION;
+  let newPoint = {
+    pos: getRotatedMouseCoordinates(),
+    timer: CLICK_EFFECT_DURATION,
+    id: Date.now() // Unique ID for this touch point
+  };
   
-  // Find nodes near click and make them spawn particles
+  // Add to touch points array
+  touchPoints.push(newPoint);
+  
+  // Limit number of touch points
+  if (touchPoints.length > MAX_TOUCH_POINTS) {
+    touchPoints.shift(); // Remove oldest touch point
+  }
+  
+  // Initial particle burst
+  spawnParticlesAtPoint(newPoint.pos);
+}
+
+// Add mouseDragged function for continuous interaction
+function mouseDragged() {
+  // Get rotated mouse coordinates
+  let currentPos = getRotatedMouseCoordinates();
+  
+  // Check if we need to update an existing point or add a new one
+  let updated = false;
+  for (let point of touchPoints) {
+    if (p5.Vector.dist(point.pos, currentPos) < 20) {
+      // Update existing point position
+      point.pos = currentPos;
+      point.timer = CLICK_EFFECT_DURATION; // Reset timer
+      updated = true;
+      break;
+    }
+  }
+  
+  // If not updating an existing point, add a new one
+  if (!updated) {
+    let newPoint = {
+      pos: currentPos,
+      timer: CLICK_EFFECT_DURATION,
+      id: Date.now()
+    };
+    touchPoints.push(newPoint);
+    
+    // Limit number of touch points
+    if (touchPoints.length > MAX_TOUCH_POINTS) {
+      touchPoints.shift();
+    }
+  }
+  
+  // Chance to spawn particles while dragging
+  if (random() < CONTINUOUS_SPAWN_RATE) {
+    spawnParticlesAtPoint(currentPos, 2); // Spawn fewer particles during continuous interaction
+  }
+  
+  return false; // Prevent default behavior
+}
+
+// Add touchStarted function for iPad support
+function touchStarted() {
+  // Handle all active touches
+  for (let i = 0; i < touches.length && i < MAX_TOUCH_POINTS; i++) {
+    // Convert touch to canvas coordinates
+    let touchX = touches[i].x;
+    let touchY = touches[i].y;
+    
+    // Get rotated coordinates
+    let rotatedPos = getRotatedTouchCoordinates(touchX, touchY);
+    
+    // Create new touch point
+    let newPoint = {
+      pos: rotatedPos,
+      timer: CLICK_EFFECT_DURATION,
+      id: touches[i].id
+    };
+    
+    // Add to touch points array
+    touchPoints.push(newPoint);
+    
+    // Initial particle burst
+    spawnParticlesAtPoint(rotatedPos);
+  }
+  
+  // Limit number of touch points
+  while (touchPoints.length > MAX_TOUCH_POINTS) {
+    touchPoints.shift();
+  }
+  
+  return false; // Prevent default behavior
+}
+
+// Add touchMoved function for iPad dragging
+function touchMoved() {
+  // Handle all active touches
+  for (let i = 0; i < touches.length && i < MAX_TOUCH_POINTS; i++) {
+    let touchX = touches[i].x;
+    let touchY = touches[i].y;
+    let rotatedPos = getRotatedTouchCoordinates(touchX, touchY);
+    
+    // Find matching touch point or create new one
+    let found = false;
+    for (let point of touchPoints) {
+      if (point.id === touches[i].id) {
+        point.pos = rotatedPos;
+        point.timer = CLICK_EFFECT_DURATION;
+        found = true;
+        break;
+      }
+    }
+    
+    if (!found) {
+      touchPoints.push({
+        pos: rotatedPos,
+        timer: CLICK_EFFECT_DURATION,
+        id: touches[i].id
+      });
+    }
+    
+    // Chance to spawn particles while dragging
+    if (random() < CONTINUOUS_SPAWN_RATE) {
+      spawnParticlesAtPoint(rotatedPos, 2);
+    }
+  }
+  
+  return false; // Prevent default behavior
+}
+
+// Helper function to get rotated touch coordinates
+function getRotatedTouchCoordinates(x, y) {
+  // Calculate touch position relative to center
+  let tx = x - width/2;
+  let ty = y - height/2;
+  
+  // Apply inverse rotation
+  let rotatedX = tx * cos(-rotationAngle) - ty * sin(-rotationAngle);
+  let rotatedY = tx * sin(-rotationAngle) + ty * cos(-rotationAngle);
+  
+  // Return coordinates relative to origin
+  return createVector(rotatedX + width/2, rotatedY + height/2);
+}
+
+// Helper function to spawn particles at a point
+function spawnParticlesAtPoint(position, multiplier = 1) {
+  // Find nodes near position
   for (let node of nodes) {
-    let distToClick = dist(node.pos.x, node.pos.y, clickPosition.x, clickPosition.y);
-    if (distToClick < CLICK_INFLUENCE_RADIUS * 0.7) {
-      // Spawn a smaller burst of particles from nearby nodes
-      let burstAmount = floor(map(distToClick, 0, CLICK_INFLUENCE_RADIUS * 0.7, 4, 1)); // Reduced max from 5 to 4
+    let distToPoint = dist(node.pos.x, node.pos.y, position.x, position.y);
+    if (distToPoint < CLICK_INFLUENCE_RADIUS * 0.7) {
+      // Spawn particles from nearby nodes
+      let burstAmount = floor(map(distToPoint, 0, CLICK_INFLUENCE_RADIUS * 0.7, 4 * multiplier, 1 * multiplier));
       if (node.outgoingEdges.length > 0) {
         for (let i = 0; i < burstAmount; i++) {
           node.createParticle();

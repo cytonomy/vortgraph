@@ -111,6 +111,12 @@ const MAX_TOUCH_POINTS = 5; // Maximum number of simultaneous touch points to tr
 // Add this constant for continuous distortion
 const CONTINUOUS_SPAWN_RATE = 0.3; // Chance to spawn particles while holding
 
+// Add these constants for pressure effect
+const PRESSURE_MAX_BUILDUP = 3.0;       // Maximum pressure multiplier
+const PRESSURE_BUILDUP_RATE = 0.08;     // How quickly pressure builds up
+const PRESSURE_SPAWN_INCREASE = 0.15;   // Increase spawn rate with pressure
+const PRESSURE_FORCE_INCREASE = 0.08;   // Increase force with pressure
+
 // Class definitions next
 class Edge {
   constructor(startNode, endNode) {
@@ -534,18 +540,21 @@ class Particle {
   }
 
   // Modify the Particle.applyClickForce method for much gentler effect
-  applyClickForce(clickPos) {
+  applyClickForce(clickPos, pressure = 1.0) {
     // Calculate distance to click
     let distToClick = p5.Vector.dist(this.pos, clickPos);
     
-    // Only affect particles within the influence radius
-    if (distToClick < CLICK_INFLUENCE_RADIUS) {
+    // Only affect particles within the influence radius (scaled by pressure)
+    let influenceRadius = CLICK_INFLUENCE_RADIUS * (1 + pressure * PRESSURE_FORCE_INCREASE);
+    
+    if (distToClick < influenceRadius) {
       // Calculate force direction (away from click)
       let forceDir = p5.Vector.sub(this.pos, clickPos);
       
-      // Scale force based on distance (stronger when closer)
-      let forceMagnitude = map(distToClick, 0, CLICK_INFLUENCE_RADIUS, 
-                           CLICK_FORCE_MAGNITUDE, CLICK_FORCE_MAGNITUDE * 0.1); // Reduced multiplier
+      // Scale force based on distance and pressure
+      let forceMagnitude = map(distToClick, 0, influenceRadius, 
+                           CLICK_FORCE_MAGNITUDE * pressure, 
+                           CLICK_FORCE_MAGNITUDE * pressure * 0.1);
       
       // Normalize and scale the force
       forceDir.normalize().mult(forceMagnitude);
@@ -554,11 +563,11 @@ class Particle {
       this.applyForce(forceDir);
       
       // Add minimal random variation
-      let randomForce = p5.Vector.random2D().mult(forceMagnitude * 0.1); // Reduced from 0.2
+      let randomForce = p5.Vector.random2D().mult(forceMagnitude * 0.1);
       this.applyForce(randomForce);
       
-      // Very slight increase in particle speed
-      this.vel.mult(1.02); // Reduced from 1.05
+      // Increase particle speed based on pressure
+      this.vel.mult(1.02 + (pressure * 0.01));
     }
   }
 }
@@ -807,9 +816,9 @@ function draw() {
           p.follow();
         }
         
-        // Apply forces from all active touch points
+        // Apply forces from all active touch points with pressure
         for (let touchPoint of touchPoints) {
-          p.applyClickForce(touchPoint.pos);
+          p.applyClickForce(touchPoint.pos, touchPoint.pressure);
         }
         
         p.update();
@@ -855,6 +864,21 @@ function draw() {
 
   // Update and remove expired touch points
   for (let i = touchPoints.length - 1; i >= 0; i--) {
+    // Update hold time and pressure
+    touchPoints[i].holdTime++;
+    
+    // Increase pressure based on hold time (with a maximum)
+    touchPoints[i].pressure = min(
+      PRESSURE_MAX_BUILDUP, 
+      1.0 + (touchPoints[i].holdTime * PRESSURE_BUILDUP_RATE / 60)
+    );
+    
+    // Spawn more particles as pressure builds
+    if (random() < CONTINUOUS_SPAWN_RATE * (1 + touchPoints[i].pressure * PRESSURE_SPAWN_INCREASE)) {
+      spawnParticlesAtPoint(touchPoints[i].pos, touchPoints[i].pressure);
+    }
+    
+    // Update timer
     touchPoints[i].timer--;
     if (touchPoints[i].timer <= 0) {
       touchPoints.splice(i, 1);
@@ -882,7 +906,9 @@ function mousePressed() {
   let newPoint = {
     pos: getRotatedMouseCoordinates(),
     timer: CLICK_EFFECT_DURATION,
-    id: Date.now() // Unique ID for this touch point
+    id: Date.now(),
+    pressure: 1.0,  // Start with base pressure
+    holdTime: 0     // Track how long the touch has been held
   };
   
   // Add to touch points array
@@ -919,7 +945,9 @@ function mouseDragged() {
     let newPoint = {
       pos: currentPos,
       timer: CLICK_EFFECT_DURATION,
-      id: Date.now()
+      id: Date.now(),
+      pressure: 1.0,  // Start with base pressure
+      holdTime: 0     // Track how long the touch has been held
     };
     touchPoints.push(newPoint);
     
@@ -952,7 +980,9 @@ function touchStarted() {
     let newPoint = {
       pos: rotatedPos,
       timer: CLICK_EFFECT_DURATION,
-      id: touches[i].id
+      id: touches[i].id,
+      pressure: 1.0,  // Start with base pressure
+      holdTime: 0     // Track how long the touch has been held
     };
     
     // Add to touch points array
@@ -993,7 +1023,9 @@ function touchMoved() {
       touchPoints.push({
         pos: rotatedPos,
         timer: CLICK_EFFECT_DURATION,
-        id: touches[i].id
+        id: touches[i].id,
+        pressure: 1.0,  // Start with base pressure
+        holdTime: 0     // Track how long the touch has been held
       });
     }
     

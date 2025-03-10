@@ -807,9 +807,9 @@ function draw() {
           p.follow();
         }
         
-        // Apply click force if active
-        if (clickActive && clickPosition) {
-          p.applyClickForce(clickPosition);
+        // Apply forces from all active touch points
+        for (let touchPoint of touchPoints) {
+          p.applyClickForce(touchPoint.pos);
         }
         
         p.update();

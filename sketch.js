@@ -80,7 +80,7 @@ const BOUNDARY_FORCE = 0.2;   // Reduced from 0.4 for gentler correction
 const EDGE_FADE_DISTANCE = 80; // Distance over which particles fade out near edges
 
 // Add these constants for rotation
-const ROTATION_SPEED = 0.0032; // Doubled from 0.0016
+const ROTATION_SPEED = 0.0038; // Increased from 0.0032
 let rotationAngle = 0;         // Current rotation angle
 
 // Add these constants for edge weights
@@ -90,7 +90,7 @@ const EDGE_WEIGHT_TO_HUB = 4;  // Edges pointing to the hub
 
 // Add these constants for differential rotation
 const INNER_ROTATION_MULTIPLIER = 1.5; // Inner nodes rotate faster
-const OUTER_ROTATION_MULTIPLIER = 0.8; // Outer nodes rotate slower
+const OUTER_ROTATION_MULTIPLIER = 1.2; // Increased from 0.8 for faster edge rotation
 const ROTATION_TRANSITION_START = 150; // Distance where transition begins
 const ROTATION_TRANSITION_END = 300;   // Distance where transition ends
 
@@ -115,7 +115,11 @@ const CONTINUOUS_SPAWN_RATE = 0.3; // Chance to spawn particles while holding
 const PRESSURE_MAX_BUILDUP = 3.0;       // Maximum pressure multiplier
 const PRESSURE_BUILDUP_RATE = 0.08;     // How quickly pressure builds up
 const PRESSURE_SPAWN_INCREASE = 0.15;   // Increase spawn rate with pressure
-const PRESSURE_FORCE_INCREASE = 0.08;   // Increase force with pressure
+const PRESSURE_FORCE_INCREASE = 0.08;   // Keep the same
+const PARTICLE_RETURN_FORCE = 0.08; // Reduced from 0.15 for less obvious paths
+
+// Add this constant for aspect ratio compensation
+const ASPECT_RATIO_COMPENSATION = true; // Enable compensation for non-square windows
 
 // Class definitions next
 class Edge {
@@ -380,6 +384,23 @@ class Particle {
         this.lifespan = 0; // Kill if no outgoing edges
       }
     }
+
+    // If this particle was recently disturbed, apply extra force to return to path
+    if (this.disturbed && this.disturbedTimer > 0) {
+      // Get nearest point on edge
+      let nearestPoint = this.getNearestPointOnEdge(this.currentEdge);
+      let returnForce = p5.Vector.sub(nearestPoint, this.pos);
+      
+      // Apply stronger return force
+      returnForce.normalize().mult(MAX_FORCE * PARTICLE_RETURN_FORCE);
+      this.applyForce(returnForce);
+      
+      // Decrease timer
+      this.disturbedTimer--;
+      if (this.disturbedTimer <= 0) {
+        this.disturbed = false;
+      }
+    }
   }
 
   // Simplified display method
@@ -408,15 +429,37 @@ class Particle {
   follow() {
     // Use gentler force for edge following
     let desiredDirection = this.currentEdge.direction.copy();
-    let force = desiredDirection.mult(MAX_FORCE * 0.8); // Reduced force
+    let force = desiredDirection.mult(MAX_FORCE * 0.8); // Back to original value
     
-    // Add gentle correction if too far from edge
+    // Add stronger correction if too far from edge
     let distFromEdge = this.distToEdge(this.currentEdge);
-    if (distFromEdge > EDGE_INFLUENCE_RADIUS * 0.3) {
+    if (distFromEdge > EDGE_INFLUENCE_RADIUS * 0.2) {
       let nearestPoint = this.getNearestPointOnEdge(this.currentEdge);
       let correction = p5.Vector.sub(nearestPoint, this.pos);
-      correction.normalize().mult(MAX_FORCE * 0.6); // Gentler correction
+      
+      // Scale correction force based on distance from edge
+      let correctionStrength = map(
+        distFromEdge, 
+        EDGE_INFLUENCE_RADIUS * 0.2, 
+        EDGE_INFLUENCE_RADIUS * 2, 
+        MAX_FORCE * 0.6, 
+        MAX_FORCE * PARTICLE_RETURN_FORCE
+      );
+      
+      correction.normalize().mult(correctionStrength);
       force.add(correction);
+    }
+
+    // Add slight aspect ratio compensation to prevent vertical/horizontal lines
+    if (ASPECT_RATIO_COMPENSATION) {
+      let aspectRatio = width / height;
+      if (aspectRatio > 1.1) { // Wider than tall
+        // Add more vertical force component
+        force.y *= (aspectRatio * 0.9);
+      } else if (aspectRatio < 0.9) { // Taller than wide
+        // Add more horizontal force component
+        force.x *= (1 / aspectRatio * 0.9);
+      }
     }
 
     this.applyForce(force);
@@ -539,7 +582,7 @@ class Particle {
     return edges[0];
   }
 
-  // Modify the Particle.applyClickForce method for much gentler effect
+  // Modify the Particle.applyClickForce method to add a return-to-path effect
   applyClickForce(clickPos, pressure = 1.0) {
     // Calculate distance to click
     let distToClick = p5.Vector.dist(this.pos, clickPos);
@@ -568,6 +611,10 @@ class Particle {
       
       // Increase particle speed based on pressure
       this.vel.mult(1.02 + (pressure * 0.01));
+      
+      // Flag this particle as disturbed so it can return to path more quickly
+      this.disturbed = true;
+      this.disturbedTimer = 20; // Will try to return to path for 20 frames
     }
   }
 }

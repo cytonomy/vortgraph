@@ -10,7 +10,7 @@ const PARTICLE_LIFESPAN = 1500;  // Reduced from 4000
 const MAX_SPEED = 1.5;      // Reduced from 2.0
 const MAX_FORCE = 0.05;      // Reduced from 0.1
 const EDGE_INFLUENCE_RADIUS = 25;  // Reduced to minimize cross-edge influence
-const SPAWN_RATE = 0.08;  // Doubled from 0.04
+const SPAWN_RATE = 0.096;  // Increased from 0.08 (20% more)
 const NODE_SIZE = 5;  // Reduced from 6 for less crowding
 const MIN_RADIUS = 150;  // Reduced from 180
 const MAX_RADIUS = 320;  // Reduced from 380
@@ -26,8 +26,8 @@ const EDGE_LENGTH = 300;  // New constant for standardized edge influence
 const INITIAL_SPEED = 1.0;     // Reduced from 1.5
 const BURST_AMOUNT = 400;  // Doubled from 200
 const MIN_LIFESPAN = 500;    // Reduced from 1000
-const MAX_PARTICLES = 4000;  // Match pool size
-const PARTICLE_POOL_SIZE = 1600;  // Doubled from 800
+const MAX_PARTICLES = 4800;  // Increased from 4000 (20% more)
+const PARTICLE_POOL_SIZE = 1920;  // Increased from 1600 (20% more)
 const POSITION_HISTORY_SIZE = 10;  // Match PARTICLE_TRAIL_LENGTH
 
 // Adjust these constants for smoother movement
@@ -72,9 +72,12 @@ let lastCleanupTime = 0;
 const EDGE_VISIBILITY = 0.08;  // Increased from 0.045 for brighter edges
 const EDGE_WEIGHT = 0.6;      // Increased from 0.45 for thicker edges
 
-// Add these constants for boundary handling
-const BOUNDARY_MARGIN = 50;  // Distance from edge to apply force
-const BOUNDARY_FORCE = 0.4;  // Strength of boundary force
+// Modify these constants for boundary handling
+const BOUNDARY_MARGIN = 100;  // Increased from 50 for a softer edge
+const BOUNDARY_FORCE = 0.2;   // Reduced from 0.4 for gentler correction
+
+// Add this constant for edge fading
+const EDGE_FADE_DISTANCE = 80; // Distance over which particles fade out near edges
 
 // Add these constants for rotation
 const ROTATION_SPEED = 0.0032; // Doubled from 0.0016
@@ -90,6 +93,16 @@ const INNER_ROTATION_MULTIPLIER = 1.5; // Inner nodes rotate faster
 const OUTER_ROTATION_MULTIPLIER = 0.8; // Outer nodes rotate slower
 const ROTATION_TRANSITION_START = 150; // Distance where transition begins
 const ROTATION_TRANSITION_END = 300;   // Distance where transition ends
+
+// Add these constants for click interaction
+const CLICK_INFLUENCE_RADIUS = 60;  // Reduced from 100 for smaller radius
+const CLICK_FORCE_MAGNITUDE = 0.6;  // Keep the same force magnitude
+const CLICK_EFFECT_DURATION = 25;   // Keep the same duration
+
+// Add these variables to track click state
+let clickActive = false;
+let clickPosition = null;
+let clickTimer = 0;
 
 // Class definitions next
 class Edge {
@@ -135,11 +148,17 @@ class Node {
       this.hue = 0;
       this.saturation = 0;
       this.brightness = 100;
-    } else {
+    } else if (isMinihub) {
       let color = NODE_COLORS[colorIndex];
       this.hue = color.h;
       this.saturation = color.s;
       this.brightness = color.b;
+    } else {
+      // Regular nodes get 20% brighter (capped at 100)
+      let color = NODE_COLORS[colorIndex];
+      this.hue = color.h;
+      this.saturation = color.s;
+      this.brightness = min(100, color.b * 1.2); // Increase brightness by 20%
     }
     
     this.outgoingEdges = [];
@@ -442,44 +461,43 @@ class Particle {
     return constrain(progress, 0, 1);
   }
 
-  // Add this new method for boundary checking
+  // Modify the Particle.checkBoundaries method for softer edges
   checkBoundaries() {
     let needsCorrection = false;
     let correction = createVector(0, 0);
+    let distanceToEdge = Infinity;
     
-    // Check horizontal boundaries
+    // Calculate distance to nearest edge and apply gentle force
     if (this.pos.x < BOUNDARY_MARGIN) {
-      correction.x = BOUNDARY_FORCE;
+      correction.x = BOUNDARY_FORCE * (1 - this.pos.x / BOUNDARY_MARGIN);
       needsCorrection = true;
+      distanceToEdge = this.pos.x;
     } else if (this.pos.x > width - BOUNDARY_MARGIN) {
-      correction.x = -BOUNDARY_FORCE;
+      correction.x = -BOUNDARY_FORCE * (1 - (width - this.pos.x) / BOUNDARY_MARGIN);
       needsCorrection = true;
+      distanceToEdge = width - this.pos.x;
     }
     
-    // Check vertical boundaries
     if (this.pos.y < BOUNDARY_MARGIN) {
-      correction.y = BOUNDARY_FORCE;
+      correction.y = BOUNDARY_FORCE * (1 - this.pos.y / BOUNDARY_MARGIN);
       needsCorrection = true;
+      distanceToEdge = min(distanceToEdge, this.pos.y);
     } else if (this.pos.y > height - BOUNDARY_MARGIN) {
-      correction.y = -BOUNDARY_FORCE;
+      correction.y = -BOUNDARY_FORCE * (1 - (height - this.pos.y) / BOUNDARY_MARGIN);
       needsCorrection = true;
+      distanceToEdge = min(distanceToEdge, height - this.pos.y);
     }
     
-    // Apply correction force if needed
+    // Apply correction force if needed (with gradual effect)
     if (needsCorrection) {
-      // If very close to edge, apply stronger correction
-      if (this.pos.x < 10 || this.pos.x > width - 10 || 
-          this.pos.y < 10 || this.pos.y > height - 10) {
-        // Reset position to safe area
-        this.pos.x = constrain(this.pos.x, 20, width - 20);
-        this.pos.y = constrain(this.pos.y, 20, height - 20);
-        
-        // Point velocity back toward center
-        this.vel = p5.Vector.sub(createVector(width/2, height/2), this.pos);
-        this.vel.normalize().mult(MAX_SPEED * 0.5);
-      } else {
-        // Just apply correction force
-        this.applyForce(correction);
+      // Apply gradual force instead of hard correction
+      this.applyForce(correction);
+      
+      // Fade out particles near the edge
+      if (distanceToEdge < EDGE_FADE_DISTANCE) {
+        // Reduce lifespan faster when closer to edge
+        let reductionFactor = map(distanceToEdge, 0, EDGE_FADE_DISTANCE, 10, 1);
+        this.lifespan -= reductionFactor;
       }
     }
   }
@@ -506,6 +524,35 @@ class Particle {
     
     // Fallback (should never reach here)
     return edges[0];
+  }
+
+  // Modify the Particle.applyClickForce method for much gentler effect
+  applyClickForce(clickPos) {
+    // Calculate distance to click
+    let distToClick = p5.Vector.dist(this.pos, clickPos);
+    
+    // Only affect particles within the influence radius
+    if (distToClick < CLICK_INFLUENCE_RADIUS) {
+      // Calculate force direction (away from click)
+      let forceDir = p5.Vector.sub(this.pos, clickPos);
+      
+      // Scale force based on distance (stronger when closer)
+      let forceMagnitude = map(distToClick, 0, CLICK_INFLUENCE_RADIUS, 
+                           CLICK_FORCE_MAGNITUDE, CLICK_FORCE_MAGNITUDE * 0.1); // Reduced multiplier
+      
+      // Normalize and scale the force
+      forceDir.normalize().mult(forceMagnitude);
+      
+      // Apply the force
+      this.applyForce(forceDir);
+      
+      // Add minimal random variation
+      let randomForce = p5.Vector.random2D().mult(forceMagnitude * 0.1); // Reduced from 0.2
+      this.applyForce(randomForce);
+      
+      // Very slight increase in particle speed
+      this.vel.mult(1.02); // Reduced from 1.05
+    }
   }
 }
 
@@ -752,6 +799,12 @@ function draw() {
         if (frameCount % 4 === 0) {
           p.follow();
         }
+        
+        // Apply click force if active
+        if (clickActive && clickPosition) {
+          p.applyClickForce(clickPosition);
+        }
+        
         p.update();
         p.display();
         
@@ -777,16 +830,57 @@ function draw() {
   
   // Spawn more particles each frame
   if (particles.length < PARTICLE_POOL_SIZE * 0.8) {
-    const spawnCount = Math.min(20, nodes.length / 3);  // Increased from 10, nodes.length/4
+    const spawnCount = Math.min(24, nodes.length / 3);  // Increased from 20 (20% more)
     for (let i = 0; i < spawnCount; i++) {
       const randomNodeIndex = Math.floor(random(nodes.length));
       nodes[randomNodeIndex].spawnParticle();
     }
   }
+
+  // Update click timer
+  if (clickActive) {
+    clickTimer--;
+    if (clickTimer <= 0) {
+      clickActive = false;
+      clickPosition = null;
+    }
+  }
 }
 
+// Add this function to transform mouse coordinates based on rotation
+function getRotatedMouseCoordinates() {
+  // Calculate mouse position relative to center
+  let mx = mouseX - width/2;
+  let my = mouseY - height/2;
+  
+  // Apply inverse rotation to get coordinates in the rotated space
+  let rotatedX = mx * cos(-rotationAngle) - my * sin(-rotationAngle);
+  let rotatedY = mx * sin(-rotationAngle) + my * cos(-rotationAngle);
+  
+  // Return coordinates relative to origin
+  return createVector(rotatedX + width/2, rotatedY + height/2);
+}
+
+// Modify mousePressed function to use smaller radius
 function mousePressed() {
-  // Empty function - click does nothing now
+  // Get rotated mouse coordinates
+  clickPosition = getRotatedMouseCoordinates();
+  clickActive = true;
+  clickTimer = CLICK_EFFECT_DURATION;
+  
+  // Find nodes near click and make them spawn particles
+  for (let node of nodes) {
+    let distToClick = dist(node.pos.x, node.pos.y, clickPosition.x, clickPosition.y);
+    if (distToClick < CLICK_INFLUENCE_RADIUS * 0.7) {
+      // Spawn a smaller burst of particles from nearby nodes
+      let burstAmount = floor(map(distToClick, 0, CLICK_INFLUENCE_RADIUS * 0.7, 4, 1)); // Reduced max from 5 to 4
+      if (node.outgoingEdges.length > 0) {
+        for (let i = 0; i < burstAmount; i++) {
+          node.createParticle();
+        }
+      }
+    }
+  }
 }
 
 // Add these functions for memory management
